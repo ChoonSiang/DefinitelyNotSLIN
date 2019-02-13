@@ -557,3 +557,897 @@
   Rules in `/etc/hosts.allow` are applied first
 
 - If no match in either `/etc/hosts.allow` or `/etc/hosts.deny`, then allow connection
+
+# Chapter 5 Samba
+
+## Creating Samba Share
+
+1. yum install samba
+
+2. yum install samba-client
+
+3. systemctl start smb
+
+4. systemctl enable smb
+
+5. Create share directory, change group owner and give full permission to group owner
+
+   - mkdir /samba_share
+   - chgrp chipmunk /samba_share
+   - chmod 775 /samba_share
+
+6. Edit /etc/samba/smb.conf
+
+   - ```
+     [myshare]  
+        comment = My Samba Share for chipmunks
+        path = /samba_share
+        guest ok = yes
+        browsable = no
+     ```
+
+7. Add samba user (smbpasswd -a alvin)
+
+8. Adjust firewall to allow connection
+
+9. Edit /etc/hosts
+
+   - ```
+     127.0.0.1 server.example.com
+     ```
+
+## Browsing Samba Share from Client
+
+1. yum install samba-client
+
+2. `smblient -L <serverIP>`to list the samba shares on the server
+
+3. `smbclient //<serverIP>/myshare`
+
+   - ```
+     •	Type 'lcd /tmp' to change your current folder to /tmp at the client.
+     •	Type '!pwd' to check your current folder at the client.
+     •	Type 'pwd' to check your current folder at the server.
+     •	Type “get sambafile1” to download the shared file.
+     •	Type “quit” to exit from the Samba client.
+     
+     ```
+
+4. `smbclient //<serverIP> /myshare –U alvin`
+
+## Error
+
+1. `chcon –Rt samba_share_t /samba_share`
+
+## Uploading Files to Samba Share
+
+1. Allow user to modify file (/etc/samba/smb.conf) (use + for group name)
+
+   - ```
+     [myshare]
+     path = /samba_share
+     browsable = no
+     write list = alvin
+     invalid users = hacker
+     valid users = alvin
+     hosts allow = .example.com 192.168.0.
+     hosts deny = ALL
+     
+     
+     ```
+
+## Mounting Samba Share Automatically upon bootup
+
+1. yum install cifs-utils
+
+2. mkdir /sambadata (mount point)
+
+3. Edit /etc/fstab `//serverIP/myshare	/sambadata	cifs	credentials=/etc/sambauser	0	0`
+
+4. vi /etc/sambauser
+
+   - ```
+     user=alvin
+     pass=<alvinpassword>
+     ```
+
+5. chmod 600 /etc/sambauser
+
+6. mount /sambadata
+
+7. ls -l /sambadata
+
+8. umount /sambadata
+
+## Accessing Home Directories through Samba
+
+1. vi /etc/samba/smb.conf
+
+   - ```
+     [homes]
+        comment = Home Directories
+        valid users = %S, %D%w%S
+        browseable = No
+        read only = No
+        inherit acls = Yes
+     
+     ```
+
+2. `setsebool -P samba_enable_home_dirs on`
+
+# Chapter 6 Securing Data
+
+## Random Number Generation
+
+1. `hexdump /dev/random` (mouse and keyboard)
+2. `hexdump /dev/urandom` (no interaction) (Not truly random)
+3. `openssl rand -base64 8` generate 8 random bytes in base64 encoding to get printable characters
+4. `openssl rand 8` 8 random bytes not necessarily printable
+5. `md5sum <file>`
+6. `<sha1sum <file>`
+7. `<sha256sum <file>`
+
+## Symmetric Encryption
+
+1. `openssl des3 -base64 -in /tmp/<input file> -out /tmp/encrypted`
+2. `openssl des3 -d -base64 -in /tmp/encrypted` to decrypt the file
+
+## Asymmetric Encryption
+
+1. `gpg --gen-key`
+
+2. `gpg --list-keys`
+
+3. `gpg --list-secret-keys`
+
+4. `gpg -a --export AliceLim > /tmp/alice_pubkey` (As user Alice export public key to a file)
+
+5. `gpg --import /tmp/alice_pubkey` (As user Bob import Alice public key)
+
+6. `gpg –-recipient AliceLim -a -o /tmp/ciphertext -e /tmp/plaintext` (Encrypt file using Alice Public Key)
+
+7. `gpg -o alicetext -a -d /tmp/ciphertext` (As Alice, decrypt the file)
+
+8. `gpg --recipient BobTan –a --sign –o /tmp/signcipher –e alice_reply` (As user Alice, encrypt and sign)
+
+9. `gpg -o bobtext -a -d /tmp/signcipher` (As User Bob, verify and decrypt signcipher)
+
+10. ```
+    To generate public/private keys
+    		gpg --gen-key
+    To list keys
+    		gpg --list-keys
+    		gpg --list-secret-keys
+    To export a public key to a file
+    		gpg -a --export > alice.publickey
+    To import a public key to Public Keyring
+    		gpg --import < /tmp/alice.publickey
+    
+    
+    To create a detached signature
+    Encrypted hash will be stored with extension “.sig” or “.asc”
+    		gpg --detach-sign –a filename
+    To verify the received hash with the original file 
+    Original file must be filename and in the same directory as hash
+    		gpg --verify filename.sig
+    
+    ```
+
+11. 
+
+## Creating Self-Signed certificate for Apache Web Server
+
+1. cd /etc/pki/tls/certs
+
+2. `make httpd.key` to generate private key for Apache Web Server
+
+3. `ls -l httpd.key` ensure the file is only readable by root
+
+4. `make httpd.crt` to generate self-signed certificate
+
+5. `mv /etc/pki/tls/certs/httpd.key /etc/pki/tls/private`
+
+6. yum install mod_ssl
+
+7. vi /etc/httpd/conf.d/ssl.conf
+
+   - ```
+     SSLCertificateFile /etc/pki/tls/certs/httpd.crt 
+     SSLCertificateKeyFile /etc/pki/tls/private/httpd.key
+     ```
+
+8. systemctl restart httpd
+
+### No passphrase key
+
+1. cd /etc/pki/tls/private
+
+2. `openssl rsa httpd.key -out httpd_nopass.key`
+
+3. vi /etc/httpd/conf.d/ssl.conf
+
+   - ```
+     SSLCertificateFile /etc/pki/tls/certs/httpd.crt 
+     SSLCertificateKeyFile /etc/pki/tls/private/httpd_nopass.key
+     
+     ```
+
+## Setting up Private Certificate Authority
+
+1. mkdir /etc/pki/CA/private
+
+2. mkdir /etc/pki/CA/certs
+
+3. chmod 700 /etc/pki/CA/private
+
+4. vi /etc/pki/tls/openssl.cnf
+
+   - ```
+     dir = /etc/pki/CA
+     certificate = $dir/certs/slin-ca.crt
+     private_key = $dir/private/slin-ca.key
+     
+     ```
+
+5. touch /etc/pki/CA/index.txt
+
+6. echo 01 > /etc/pki/CA/serial
+
+7. cd /etc/pki/CA
+
+8. `openssl genrsa -des3 2048 > private/slin-ca.key` (Generate a 2048 bitprivate key for private CA)
+
+9. chmod 600 /etc/pki/CA/private/slin-ca.key
+
+10. `openssl req -new -x509 -days 365 -key private/slin-ca.key > certs/slin-ca.crt` to generate a self-signed certificate for private CA
+
+11. mkdir /var/www/html/pub
+
+12. cp /etc/pki/CA/certs/slin-ca.crt /var/www/html/pub
+
+13. http://localhost/pub/slin-ca.crt
+
+## Signing Apache Web Server certificate using Private CA
+
+1. cd /etc/pki/tls
+
+2. `openssl genrsa 1024 > private/httpd2.key` (new private key for web server that does not require passphrase)
+
+3. chmod 600 private.httpd2.key
+
+4. `openssl req -new -key private/httpd2.key -out certs/httpd2.csr` to generate a certificate signing request (csr)
+
+5. `openssl ca -in certs/httpd2.csr -out certs/httpd2.crt` to use CA private key to sign the CSR
+
+6. Configure Apache to use the new certificate and private key. `vi /etc/httpd/conf.d/ssl.conf`
+
+   - ```
+     SSLCertificateFile /etc/pki/tls/certs/httpd2.crt 
+     SSLCertificateKeyFile /etc/pki/tls/private/httpd2.key
+     
+     ```
+
+7. systemctl restart httpd
+
+8. import slin-ca.crt into the Trusted Authorities
+
+9. Access the website using proper domain name
+
+## SSH with Key-Based Authentication
+
+1. ssh-keygen -t rsa
+2. `ls /home/student/.ssh` to view the private and public keys
+3. As user student, ssh to server and create the directory /home/student/.ssh
+4. chmod 700 .ssh
+5. `scp /home/student/.ssh/id_rsa.pub <serverIP>:/home/student/.ssh/authorized_keys`
+6. On server, as user student, chmod 600 authorized_keys
+7. On Client student, ssh to server
+
+## SSH Agent
+
+1. `ssh-add`  as student
+2. `ssh <serverIP>`, no passphrase will be asked
+
+## Virtual Network Computing through SSH Tunnel
+
+1. On server, yum install vnc-server
+2. `cp /lib/systemd/system/vncserver@.service /etc/systemd/system/vncserver@.service` to make a copy of the vncserver config file
+3. vi /etc/systemd/system/vnc@.service
+   - `ExecStart=/sbin/runuser -l <USER> -c "/usr/bin/vncserver %i" PIDFile=/home/<*USER>*/.vnc/%H%i.pid`
+4. As user student, set a vnc password `vncpasswd`
+5. systemctl daemon-reload
+6. systemctl start vncserver@:1
+7. netstat -tunap to look for listening ports of Xvnc (Usually is port 5901)
+8. Adjust firewall to allow connection to the VNC Server.
+9. As client, yum install vnc
+10. As client student, `vncviewer <serverIP:1>`
+
+## VNC Through SSH tunnel
+
+1. `vncviewer –via <serverIP> localhost:1`
+
+## SSH Tunnel to do Local Port Fowarding
+
+1. At Server, Adjust firewall to block HTTP traffic
+2. On client, `ssh -L 8000:localhost:80 <serverIP>`, to open local port 8000 on client and establish SSH connection to the server. Any data sent to local port 8000 will be forwarded through the SSH tunnel to the remote port 80 on the server.
+3. On client, browse to `http://localhost:8000`, you will see the server’s webpage
+
+## Block Local Port Forwarding
+
+1. vi /etc/ssh/sshd_config `AllowTCPForwarding no`
+2. systemctl restart sshd
+
+# Chapter 7 System Monitoring
+
+## Network monitoring
+
+1. netstat -tunpl
+2. nmap
+3. tcpdump -i eno16777736
+4. tcpdump icmp -i eno16777736
+5. tcpdump tcp -i eno16777736
+6. wireshark
+
+## System Logging
+
+1. All authpriv messages are logged to /var/log/secure
+
+2. vi /etc/rsyslog.conf (authpriv with priority warning and higher will also be logged to /var/log/securewarning)
+
+   - ```
+     authpriv.*			/var/log/secure
+     authpriv.warning	/var/log/securewarning
+     
+     ```
+
+3. systemctl restart rsyslog
+
+4. Creating logged entry
+
+   - ```
+     logger -p authpriv.warning "This is a test warning"
+     logger -p authpriv.alert "This is a test alert"
+     logger -p authpriv.info "This is a test info msg"
+     
+     ```
+
+![priority](F:\Year 2 Sem 2\SLIN\Exam\priority.JPG)
+
+
+
+## Remote Logging
+
+1. On server, vi /etc/rsyslog.conf (remove the comment)
+
+   - ```
+     $ModLoad imudp
+     $UDPServerRun 514
+     
+     ```
+
+2. systemctl restart rsyslog
+
+3. Adjust firewall to allow incoming connections to rsyslog port
+
+4. On Client, vi /etc/rsyslog.conf
+
+   - ```
+     authpriv.warning	@<serverIP>
+     kern.*            	@@192.168.0.4:8900
+     *.info;mail.none    @192.168.0.5 #All info and up but mail are logged
+     
+     
+     ```
+
+5. systemctl restart rsyslog
+
+```
+Key log files at /var/log/
+
+messages		default location for messages
+secure		login messages
+maillog		mail messages
+boot.log		messages at startup and shutdown
+httpd/*		Apache webserver messages
+cups/*		print messages
+samba/*		Samba server messages
+
+```
+
+
+
+## Resolving IP addresses in Apache Logs
+
+1. On server, ls /var/log/httpd
+2. `logresolve < /var/log/httpd/<site_access_log> >/tmp/apachelog`
+
+## Webalizer for Apache
+
+1. yum install GeoIP
+2. yum install webalizer
+3. cat /etc/webalizer.conf
+4. `webalizer` (run the program)
+5. ls /var/www/usage
+6. browse to `http://localhost/usage`
+
+## Swatchdog for real-time Log Monitoring
+
+1. ```
+   yum install perl-ExtUtils-MakeMaker
+   yum install perl-Time-HiRes
+   yum install perl-Date-Calc
+   yum install perl-Date-Manip
+   yum install perl-TimeDate
+   
+   ```
+
+2. yum install perl-File-Tail
+
+3. download swatchdog from `sourceforge.net/projects/swatch/files/swatchdog` or blackboard
+
+4. tar -xvf swatchdog-3.2.4.tar.gz
+
+5. cd swatchdog-3.2.4
+
+6. ```
+   perl Makefile.PL
+   make
+   make test
+   make install
+   make realclean
+   
+   ```
+
+7. vi /etc/swatchdog.conf
+
+   - ```
+     watchfor /ssh/
+     	echo bold
+     
+     ```
+
+8. Run Swatchdog using `swatchdog -c /etc/swatchdog.conf -t /var/log/secure`
+
+9. Email when alerted
+
+   - ```
+     watchfor /ssh.*(F|f)ailed/
+         echo bold red
+         mail addresses=root,subject=”SSH failed connection”
+     
+     ```
+
+10. Brute force
+
+    - ```
+      watchfor /ssh.*[F|f]ailed/
+          echo bold red
+          mail addresses=root,subject=”Possible SSH Brute Force Attack”
+          threshold track_by=$1, type=threshold, count=6, seconds=20
+      
+      ```
+
+11. Background swatchdog `nohup swatchdog –c /etc/swatchdog.conf –t /var/log/secure 2>&1  > /dev/null &`
+
+## Finding Files based on specific criteria
+
+1. ```
+   -rw-r--r--    a     (chmod 644 a)
+   -rw-rw-r--    b     (chmod 664 b)
+   -rw-rw-rw-    c     (chmod 666 c)
+   -rw-r--rw-    d     (chmod 646 d)
+   -rwxrwxrw-    e     (chmod 776 e)
+   
+   find . –perm 644	(Ans : a)
+   find . –perm -644	(Ans : a,b,c,d,e)
+   find . –perm 022	(Ans : none)
+   find . –perm -022	(Ans : c,e)
+   find . –perm /022	(Ans : b,c,d,e)
+   
+   
+   ```
+
+2. `find / -nouser`
+
+3. `find / -mtime -1` modified in the last day
+
+4. `find / -mmin -60` modified in the last hour
+
+## Listing open files (lsof)
+
+1. `lsof +D /tmp` list opened files in the /tmp directory
+
+2. `lsof -n -i`list files opened by network-related processes
+
+3. `lsof -n -i 4` list files opened by ipv4 network related processes
+
+4. ```
+   HTTPD_PID=`ps -ef | grep httpd | head -1 | awk '{print $2}'`lsof –p $HTTPD_PID
+   
+   ```
+
+## AIDE (Advanced Intrusion Detection Environment)
+
+1. yum install aide
+2. cat /etc/aide.conf
+3. `aide –-init -–config /etc/aide.conf` to create initial baseline database
+4. `mv /var/lib/aide/aide.db.new.gz /var/lib/aide/aide.db.gz` rename the database to use it
+5. `aide –-check –-config /etc/aide.conf` to run a check and compare with the baseline database
+
+## Getting usage statistics
+
+1. `df -T` or `df -Th` to view disk space utilization
+2. `du -sh /home/*` to see how big each user’s home directory is
+3. `iostat`, `iostat -N` or `iostat -m` to  view CPU and disk utilization 
+   - -N to view logical volume disk utilization
+   - -m to view in megabytes instead of kilobytes
+4. `free -m`, `vmstat` or `vmstat -s` to see virtual memory statistics
+5. `sar` to view summary of CPU activity
+   1. `sar -f /var/log/sa/<filename> | less` to view available reports and see a report of CPU activity of a previous dat
+   2. `sar -n DEV` to view network statistics on each network interface
+
+## Settings process limits
+
+1. vi /etc/security/limits.conf `alvin	hard	maxlogins	1`, to limit user Alvin to only 1 login
+
+2. `ps –u alvin` to view how many processes started by the user
+
+3. vi /etc/security/limits.conf (restrict user alvin to 10 soft and 20 hard processes)
+
+   - ```
+     alvin	soft	nproc		10
+     alvin	hard	nproc		20
+     @chipmunks hard nproc		20
+     
+     ```
+
+4. `ulimit -a` to view the max user processes the user can run
+
+5. `ulimit -u 16` to change the ulimit to 16, but not more than 20
+
+## Process Accounting
+
+1. yum install psacct
+2. systemctl start psacct
+3. `ac -dp` to check the daily connect times for each user
+4. `lastcomm alvin` to view information about the recent commands run by User Alvin
+
+# Domain Name System (DNS)
+
+## Setting up basic caching only DNS Server with bind
+
+1. yum install bind bind-utils
+
+2. `ls -l /etc/named.conf` ensure the group owner is “named”
+
+3. `cat /etc/resolv.conf` to find the original local DNS Server
+
+4. ```
+   listen-on port 53 { any; };
+   allow-query { localhost; 192.168.137.0/24; };
+   forwarders { 192.168.137.2; };
+   
+   ```
+
+5. The above will allow client subnet to make queries.
+
+6. ```
+   dnssec-enable no;
+   dnssec-validation	  no;
+   
+   ```
+
+7. systemctl start named
+
+8. cat /etc/log/messages to check if there are any errors with named service
+
+9. `vi /etc/resolv.conf`, comment all lines and add `nameserver <serverIP>`
+
+10. To make permanent update to /etc/resolv.conf, `vi /etc/NetworkManager/NetworkManager.conf`
+
+    - ```
+      [main]
+      plugins=ifcfg-rh
+      dns=none
+      
+      ```
+
+      
+
+11. systemctl restart NetworkManager
+
+## Setting up Forward Lookup Zone
+
+1. Make your DNS Server responsible for the zone “example.com”
+
+2. ```
+   vi /etc/named.conf
+   
+   zone "." IN {
+       type hint;
+       file "named.ca";
+   };
+   
+   zone "example.com" IN {
+       type master;
+       file "example.com.zone";
+   };
+   
+   ```
+
+3. Zone files are stored in /var/named
+
+4. vi /var/named/example.com.zone (the server below refers to the server hostname)
+
+   - ```
+     $TTL 86400
+     example.com.       IN SOA server root (
+                               42   ; serial
+                               3H   ; refresh
+                               15M  ; retry
+                               1W   ; expiry
+                               1D ) ; minimum
+     example.com.     	IN NS server
+     example.com.		IN MX 10 server
+     
+     server			IN A 172.16.10.13
+     client			IN A 172.16.10.33
+     testpc          IN A 172.16.199
+     
+     ```
+
+5. `chgrp named /var/named/example.com.zone`
+
+6. systemctl restart named
+
+## Setting up Reverse Lookup Zone
+
+1. ```
+   vi /etc/named.conf
+   
+   zone "." IN {
+       type hint;
+       file "named.ca";
+   };
+   
+   zone "example.com" IN {
+       type master;
+       file "example.com.zone";
+   };
+   
+   zone "10.16.172.in-addr.arpa" IN {
+    type master;
+    file "172.16.10.zone";
+   };
+   
+   ```
+
+2. Create a new reverse zone file
+
+3. vi /var/named/172.16.10.zone
+
+   - ```
+     $TTL	86400
+     @	IN SOA server.example.com. root.server.example.com. (
+     			42	; serial
+     			28800	; refresh
+     			14400	; retry
+     			3600000	; expiry
+     			86400 )	; minimum
+     	IN NS	server.example.com.
+     
+     33	IN PTR	client.example.com.
+     13	IN PTR	server.example.com.
+     199	IN PTR	testpc.example.com.
+     
+     ```
+
+4. `chgrp named /var/named/172.16.10.zone`
+
+5. `systemctl restart named`
+
+## Connecting to DNS Server from the client
+
+1. On Client, vi /etc/resolv.conf, comment all lines and add `nameserver <serverIP>`
+2. Make persistent in `/etc/NetworkManager/NetworkManager.conf`
+3. Check firewall, port 53
+
+## Perform a Zone transfer
+
+1. dig -t axfr example.com
+
+2. On server, restrict zone transfer to specific IP
+
+3. vi /etc/named.conf
+
+   - ```
+     allow-query { localhost; 192.168.0.0/16; };
+     allow-transfer { 172.16.10.199; };
+     
+     ```
+
+4. systemctl restart dns
+
+# Chapter 9 E-Mail
+
+## configuring PostFix to listen to external network interfaces
+
+1. systemctl status postfix
+
+2. postfix service starts the master process. `netstat –tunap | grep master`
+
+3. By default, postfix is listening only on the loopback interface 127.0.0.1 on Port 25
+
+4. vi /etc/postfix/main.cf
+
+   - ```
+     inet_interfaces = all  
+     # and comment out 
+     #inet_interfaces = localhost
+     
+     ```
+
+5. systemctl restart postfix
+
+## Mutt 
+
+1. Mutt is an example of Mail User Agent (MUA)
+2. yum install mutt
+3. client type `mutt` to try out
+
+## Mail aliases
+
+1. vi /etc/aliases
+
+   - ```
+     query: student
+     # mail query will be sent to student
+     
+     ```
+
+## Sending emails between system
+
+1. On server, do a dig to see if the hostname can be resolved to its IP address
+
+2. `cat /var/log/maillog` constantly to check for any error
+
+3. On Client, adjust the firewall rules to allow incoming emails.
+
+   - ```
+     port 110 (pop3)
+     port 995 (pop3s)
+     port 143 (imap)
+     port 993 (imaps)
+     port 25 (smtp)
+     
+     ```
+
+4. systemctl restart postfix
+
+5. `mail student@client.example.com`
+
+6. `mailq` to check if the mail has been sent
+
+## Configuring SMTP Server to relay mails for internal network
+
+1. `vi /etc/postfix/main.cf`
+
+   - ```
+     mynetworks = 172.16.10.0/24
+     # This will relay emails from 172.16.10.0/24 subnet to external networks
+     
+     ```
+
+2. systemctl restart postfix
+
+## Configuring SMTP Server to receive mails for the local domain
+
+1. `vi /etc/postfix/main.cf`
+
+   - ```
+     mydestination = $myhostname, localhost.$mydomain, localhost, example.com
+     # adding example.com will accept emails coming for the example.com domain
+     
+     ```
+
+2. systemctl restart postfix
+
+## Configure Postfix to send mail using Gmail
+
+1. https://www.linode.com/docs/email/postfix/configure-postfix-to-send-mail-using-gmail-and-google-apps-on-debian-or-ubuntu/
+
+# Chapter 10 User Authentication
+
+## Pam_permit to allow access without passwords
+
+1. vi /etc/pam.d/login
+
+   - ```
+     auth sufficient	pam_permit.so
+     # add to the TOP
+     
+     ```
+
+## Pam_listfile to control access to vsftpd service
+
+1. `vi /etc/pam.d/vsftpd` and locate the following line
+
+   - ```
+     auth required pam_listfile.so item=user sense=deny file=/etc/vsftpd/ftpusers onerr=succeed
+     
+     ```
+
+2. Add a user to /etc/vsftpd/ftpusers
+
+3. The user can no longer ftp to the server
+
+## Pam_tally to track login attempts
+
+1. man pam_tally2
+
+2. cat /etc/pam.d/login and ensure it includes the file `system-auth`
+
+3. `vi /etc/pam.d/system-auth`
+
+   - ```
+     auth required pam_env.so
+     auth required pam_tally2.so deny=3 unlock_time=100
+     
+     account required pam_unix.so
+     account required pam_tally2.so
+     
+     ```
+
+4. `pam_tally2` to view failed attempts
+
+5. `pam_tally2 --user >username> --reset`
+
+
+
+## Using pam_time to restrict access to services based on time
+
+1. man pam_time
+
+2. config file is /etc/security/time.conf
+
+3. man time.conf
+
+4. vi /etc/pam.d/vsftpd
+
+   - ```
+     auth       required    pam_shells.so
+     auth       include     password-auth
+     account    required    pam_time.so # add this line to use the pam_time module
+     account    include     password-auth
+     
+     
+     ```
+
+5. vi /etc/security/time.conf
+
+   - ```
+     vsftpd;*;alvin;!Mo0000-2400
+     
+     ```
+
+## nsswitch.conf
+
+1. cat /etc/nsswitc.conf
+
+   - ```
+     passwd:	files
+     shadow:	files
+     group:	files
+     hosts:	files dns
+     
+     Currently user accounts, shadow passwords and groups are read from the local files only. So all users and groups who can login to the system are local. Hostnames are resolved by looking at the local file (/etc/hosts) and then by checking the DNS Server.
+     
+     
+     ```
+
+## Allocating admin tasks to normal users with sudo
+
+1. As root, visudo
+2. `simon  ALL=/usr/bin/systemctl * httpd` allow simon to start and stop httpd
+3. `simon ALL=/usr/bin/systemctl * httpd, /bin/vi /etc/httpd/*` allow simon to vi
+4. Logs sudo tasks in`/var/log/secure`
